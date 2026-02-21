@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { MEMORY_FILE_PATTERNS } from "@memai/shared";
 import { db } from "../db/index.js";
 import {
@@ -50,9 +50,12 @@ export async function scanRepoForMemoryFiles(repoId: string) {
 
   // Import discovered files as memories
   for (const file of discoveredFiles) {
-    // Check if already tracked
+    // Check if already tracked (by repoId + filePath)
     const existing = await db.query.repoMemoryFiles.findFirst({
-      where: eq(repoMemoryFiles.repoId, repoId),
+      where: and(
+        eq(repoMemoryFiles.repoId, repoId),
+        eq(repoMemoryFiles.filePath, file.filePath)
+      ),
     });
 
     if (existing?.fileSha === file.sha) continue; // No change

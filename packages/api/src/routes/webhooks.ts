@@ -52,12 +52,14 @@ export async function webhookRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: "Repo not connected" });
     }
 
-    // Verify webhook signature
-    if (signature && rawBody) {
-      const valid = verifyWebhookSignatureSync(rawBody, signature, repo.webhookSecret);
-      if (!valid) {
-        return reply.status(401).send({ error: "Invalid signature" });
-      }
+    // Verify webhook signature (mandatory)
+    if (!signature || !rawBody) {
+      return reply.status(401).send({ error: "Missing webhook signature" });
+    }
+
+    const valid = verifyWebhookSignatureSync(rawBody, signature, repo.webhookSecret);
+    if (!valid) {
+      return reply.status(401).send({ error: "Invalid signature" });
     }
 
     // Collect changed files

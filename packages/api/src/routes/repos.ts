@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { connectedRepos, repoMemoryFiles, users } from "../db/schema.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { auditLog } from "../middleware/audit.js";
 import { connectRepoSchema, pushToRepoSchema } from "@memai/shared";
 import {
   listUserRepos,
@@ -61,7 +62,7 @@ export async function repoRoutes(app: FastifyInstance) {
   // Connect a repo
   app.post(
     "/api/v1/repos/connect",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("connect", "repo") },
     async (request, reply) => {
       const body = connectRepoSchema.parse(request.body);
 
@@ -125,7 +126,7 @@ export async function repoRoutes(app: FastifyInstance) {
   // Disconnect a repo
   app.delete(
     "/api/v1/repos/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("disconnect", "repo") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -184,7 +185,7 @@ export async function repoRoutes(app: FastifyInstance) {
   // Push memory to repo
   app.post(
     "/api/v1/repos/:id/push",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("push", "repo") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = pushToRepoSchema.parse(request.body);

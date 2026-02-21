@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../middleware/auth.js";
+import { auditLog } from "../middleware/audit.js";
 import { createSessionSchema, endSessionSchema, createSessionEventSchema } from "@memai/shared";
 import * as sessionService from "../services/session.service.js";
 
@@ -29,13 +30,19 @@ export async function sessionRoutes(app: FastifyInstance) {
       const { id } = request.params as { id: string };
       const session = await sessionService.getSession(id);
       if (!session) return reply.status(404).send({ error: "Session not found" });
+
+      // Students can only view their own sessions
+      if (request.userRole !== "admin" && session.userId !== request.userId) {
+        return reply.status(403).send({ error: "Forbidden" });
+      }
+
       return session;
     }
   );
 
   app.post(
     "/api/v1/sessions",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("create", "session") },
     async (request, reply) => {
       const body = createSessionSchema.parse(request.body);
       const session = await sessionService.createSession({
@@ -48,7 +55,7 @@ export async function sessionRoutes(app: FastifyInstance) {
 
   app.post(
     "/api/v1/sessions/:id/end",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("end", "session") },
     async (request) => {
       const { id } = request.params as { id: string };
       const body = endSessionSchema.parse(request.body);
@@ -60,8 +67,18 @@ export async function sessionRoutes(app: FastifyInstance) {
   app.get(
     "/api/v1/sessions/:id/events",
     { preHandler: [authMiddleware] },
-    async (request) => {
+    async (request, reply) => {
       const { id } = request.params as { id: string };
+
+      // Students can only view events for their own sessions
+      if (request.userRole !== "admin") {
+        const session = await sessionService.getSession(id);
+        if (!session) return reply.status(404).send({ error: "Session not found" });
+        if (session.userId !== request.userId) {
+          return reply.status(403).send({ error: "Forbidden" });
+        }
+      }
+
       return sessionService.listSessionEvents(id);
     }
   );

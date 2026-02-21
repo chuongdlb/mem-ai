@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { projects } from "../db/schema.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { auditLog } from "../middleware/audit.js";
 import { createProjectSchema, updateProjectSchema } from "@memai/shared";
 
 export async function projectRoutes(app: FastifyInstance) {
@@ -32,7 +33,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
   app.post(
     "/api/v1/projects",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("create", "project") },
     async (request, reply) => {
       const body = createProjectSchema.parse(request.body);
       const [project] = await db
@@ -45,7 +46,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
   app.patch(
     "/api/v1/projects/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("update", "project") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateProjectSchema.parse(request.body);
@@ -61,7 +62,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
   app.delete(
     "/api/v1/projects/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("delete", "project") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       await db.delete(projects).where(eq(projects.id, id));

@@ -71,6 +71,7 @@ export interface MemoryVersion {
   changedBy: string;
   changeReason: ChangeReason;
   createdAt: string;
+  archivedAt?: string;
 }
 
 export interface Session {
@@ -91,6 +92,7 @@ export interface SessionEvent {
   content: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
+  archivedAt?: string;
 }
 
 export interface ConnectedRepo {
@@ -147,4 +149,14 @@ export interface AuditLog {
   details?: Record<string, unknown>;
   ipAddress?: string;
   createdAt: string;
+  archivedAt?: string;
+}
+
+export interface RetentionPolicy {
+  id: string;
+  resource: string;
+  days: number;
+  enabled: boolean;
+  updatedAt: string;
+  updatedBy?: string;
 }

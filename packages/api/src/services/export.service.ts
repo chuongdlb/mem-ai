@@ -25,6 +25,8 @@ export async function exportProjectMemories(
       return formatGeminiMd(project.name, projectMemories);
     case "cursorrules":
       return formatCursorrules(projectMemories);
+    case "skill-md":
+      return formatSkillMd(project.name, projectMemories);
     case "json":
       return JSON.stringify(projectMemories, null, 2);
     case "report":
@@ -83,6 +85,22 @@ function formatReport(
     out += `## ${capitalize(category)} (${items.length})\n\n`;
     for (const m of items) {
       out += `### ${m.title}\n${m.content}\n\n`;
+    }
+  }
+  return out;
+}
+
+function formatSkillMd(
+  projectName: string,
+  mems: Array<{ title: string; content: string; category: string; tags: string[] }>
+): string {
+  let out = `# ${projectName} — Skill Knowledge\n\n`;
+  const grouped = groupByCategory(mems);
+  for (const [category, items] of Object.entries(grouped)) {
+    out += `## ${capitalize(category)}\n\n`;
+    for (const m of items) {
+      const tagStr = m.tags?.length ? ` [${m.tags.join(", ")}]` : "";
+      out += `### ${m.title}${tagStr}\n${m.content}\n\n`;
     }
   }
   return out;

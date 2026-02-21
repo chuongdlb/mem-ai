@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../middleware/auth.js";
+import { auditLog } from "../middleware/audit.js";
 import {
   createMemorySchema,
   updateMemorySchema,
@@ -43,7 +44,7 @@ export async function memoryRoutes(app: FastifyInstance) {
 
   app.post(
     "/api/v1/memories",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("create", "memory") },
     async (request, reply) => {
       const body = createMemorySchema.parse(request.body);
       const memory = await memoryService.createMemory({
@@ -56,7 +57,7 @@ export async function memoryRoutes(app: FastifyInstance) {
 
   app.patch(
     "/api/v1/memories/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("update", "memory") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateMemorySchema.parse(request.body);
@@ -67,7 +68,7 @@ export async function memoryRoutes(app: FastifyInstance) {
 
   app.delete(
     "/api/v1/memories/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("delete", "memory") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       await memoryService.deleteMemory(id);
@@ -101,9 +102,19 @@ export async function memoryRoutes(app: FastifyInstance) {
   // Sharing
   app.post(
     "/api/v1/memories/share",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("share", "memory") },
     async (request, reply) => {
       const body = shareMemorySchema.parse(request.body);
+
+      // Verify the requesting user owns the memory (admins can share any)
+      if (request.userRole !== "admin") {
+        const memory = await memoryService.getMemory(body.memoryId);
+        if (!memory) return reply.status(404).send({ error: "Memory not found" });
+        if (memory.userId !== request.userId) {
+          return reply.status(403).send({ error: "You can only share your own memories" });
+        }
+      }
+
       const share = await sharingService.shareMemory(body);
       return reply.status(201).send(share);
     }
@@ -128,7 +139,7 @@ export async function memoryRoutes(app: FastifyInstance) {
 
   app.delete(
     "/api/v1/memories/shares/:shareId",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("unshare", "memory") },
     async (request, reply) => {
       const { shareId } = request.params as { shareId: string };
       await sharingService.unshareMemory(shareId);

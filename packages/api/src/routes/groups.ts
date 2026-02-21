@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { groups, groupMembers, users } from "../db/schema.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { auditLog } from "../middleware/audit.js";
 import { createGroupSchema, updateGroupSchema, addGroupMemberSchema } from "@memai/shared";
 
 export async function groupRoutes(app: FastifyInstance) {
@@ -34,7 +35,7 @@ export async function groupRoutes(app: FastifyInstance) {
 
   app.post(
     "/api/v1/groups",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("create", "group") },
     async (request, reply) => {
       const body = createGroupSchema.parse(request.body);
 
@@ -59,7 +60,7 @@ export async function groupRoutes(app: FastifyInstance) {
 
   app.patch(
     "/api/v1/groups/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("update", "group") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateGroupSchema.parse(request.body);
@@ -77,7 +78,7 @@ export async function groupRoutes(app: FastifyInstance) {
 
   app.delete(
     "/api/v1/groups/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("delete", "group") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       await db.delete(groups).where(eq(groups.id, id));
@@ -88,7 +89,7 @@ export async function groupRoutes(app: FastifyInstance) {
   // Members
   app.post(
     "/api/v1/groups/:id/members",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("add_member", "group") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = addGroupMemberSchema.parse(request.body);
@@ -105,13 +106,16 @@ export async function groupRoutes(app: FastifyInstance) {
 
   app.delete(
     "/api/v1/groups/:id/members/:userId",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("remove_member", "group") },
     async (request, reply) => {
       const { id, userId } = request.params as { id: string; userId: string };
       await db
         .delete(groupMembers)
         .where(
-          eq(groupMembers.groupId, id)
+          and(
+            eq(groupMembers.groupId, id),
+            eq(groupMembers.userId, userId)
+          )
         );
       return reply.status(204).send();
     }

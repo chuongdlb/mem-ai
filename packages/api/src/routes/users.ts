@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { users } from "../db/schema.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireAdmin } from "../middleware/rbac.js";
+import { auditLog } from "../middleware/audit.js";
 import { updateUserSchema } from "@memai/shared";
 
 export async function userRoutes(app: FastifyInstance) {
@@ -56,7 +57,7 @@ export async function userRoutes(app: FastifyInstance) {
 
   app.patch(
     "/api/v1/users/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware], onResponse: auditLog("update", "user") },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateUserSchema.parse(request.body);

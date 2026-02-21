@@ -21,10 +21,12 @@ graph TD
 
     subgraph Digital Ocean VPS
         NG[nginx reverse proxy] -->|:3000| API[Fastify REST API]
-        NG -->|:3001| DASH[React Dashboard]
+        NG -->|:80| DASH[React Dashboard]
         API --> PG[(PostgreSQL + pgvector)]
         API --> OL[Ollama]
         OL -->|nomic-embed-text| EMB[768-dim Embeddings]
+        API -->|setInterval 24h| SCHED[Retention Scheduler]
+        SCHED -->|archive expired rows| PG
     end
 
     subgraph GitHub
@@ -34,8 +36,10 @@ graph TD
     end
 
     BROWSER[Browser] -->|HTTPS| NG
-    BROWSER -->|JWT cookie| DASH
+    BROWSER -->|JWT Bearer| DASH
 ```
+
+> **Note**: In development, the API runs on `:3000` (Fastify directly) and the dashboard on `:5173` (Vite dev server). In production, nginx serves the dashboard on `:80`/`:443` and proxies API requests to `:3000`.
 
 ### Technology Stack
 
@@ -64,6 +68,7 @@ erDiagram
     users ||--o{ connectedRepos : connects
     users ||--o{ groupMembers : joins
     users ||--o{ auditLogs : generates
+    users ||--o{ retentionPolicies : configures
 
     groups ||--o{ groupMembers : has
     groups ||--o{ projects : contains
@@ -71,10 +76,13 @@ erDiagram
 
     projects ||--o{ memories : contains
     projects ||--o{ sessions : tracks
+    projects ||--o{ connectedRepos : linked
 
     memories ||--o{ memoryVersions : versioned
     memories ||--o{ memoryShares : shared
     memories ||--o{ repoMemoryFiles : synced
+
+    memoryVersions }o--|| users : changedBy
 
     sessions ||--o{ sessionEvents : logs
 
@@ -89,6 +97,8 @@ erDiagram
         text github_id UK
         text google_id UK
         text github_access_token_enc "AES-256-GCM"
+        timestamp created_at
+        timestamp updated_at
     }
 
     personalAccessTokens {
@@ -98,6 +108,7 @@ erDiagram
         text token_hash UK "SHA-256"
         timestamp expires_at
         timestamp last_used_at
+        timestamp created_at
     }
 
     groups {
@@ -105,12 +116,15 @@ erDiagram
         text name
         text description
         uuid created_by FK
+        timestamp created_at
+        timestamp updated_at
     }
 
     groupMembers {
         uuid id PK
         uuid group_id FK
-        uuid user_id FK
+        uuid user_id FK "unique(group_id, user_id)"
+        timestamp joined_at
     }
 
     projects {
@@ -118,6 +132,8 @@ erDiagram
         text name
         text description
         uuid group_id FK
+        timestamp created_at
+        timestamp updated_at
     }
 
     memories {
@@ -132,6 +148,8 @@ erDiagram
         boolean is_pinned
         integer version
         vector embedding "768-dim"
+        timestamp created_at
+        timestamp updated_at
     }
 
     memoryVersions {
@@ -140,7 +158,11 @@ erDiagram
         integer version
         text title
         text content
+        text source_agent
+        uuid changed_by FK
         text change_reason "4 reasons"
+        timestamp created_at
+        timestamp archived_at "retention"
     }
 
     memoryShares {
@@ -149,6 +171,7 @@ erDiagram
         uuid shared_with_user_id FK
         uuid shared_with_group_id FK
         text level "read | write"
+        timestamp created_at
     }
 
     sessions {
@@ -168,25 +191,35 @@ erDiagram
         text event_type "5 types"
         text content
         jsonb metadata
+        timestamp created_at
+        timestamp archived_at "retention"
     }
 
     connectedRepos {
         uuid id PK
         uuid user_id FK
         bigint github_repo_id
+        text owner
+        text name
         text full_name
+        text default_branch
+        bigint webhook_id
         text webhook_secret
         uuid project_id FK
         boolean is_active
+        timestamp last_synced_at
+        timestamp created_at
     }
 
     repoMemoryFiles {
         uuid id PK
         uuid repo_id FK
-        text file_path
+        text file_path "unique(repo_id, file_path)"
         text file_sha
         text agent_type
         uuid memory_id FK
+        timestamp last_synced_at
+        timestamp created_at
     }
 
     auditLogs {
@@ -197,6 +230,17 @@ erDiagram
         text resource_id
         jsonb details
         text ip_address
+        timestamp created_at
+        timestamp archived_at "retention"
+    }
+
+    retentionPolicies {
+        uuid id PK
+        text resource UK "session_events | memory_versions | audit_logs"
+        integer days "default 90"
+        boolean enabled "default true"
+        timestamp updated_at
+        uuid updated_by FK
     }
 ```
 
@@ -222,7 +266,7 @@ erDiagram
 - **MCP Server**: Personal Access Token (`Authorization: Bearer memai_<64hex>`)
 - Both resolved in `authMiddleware` — JWT tried first, then PAT hash lookup
 
-### Endpoint Inventory (45+ endpoints)
+### Endpoint Inventory (56 endpoints)
 
 #### Health
 | Method | Path | Auth | Description |
@@ -271,12 +315,12 @@ erDiagram
 #### Memories (11 endpoints)
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/memories` | JWT/PAT | List memories (filters: projectId, category) |
+| GET | `/memories` | JWT/PAT | List memories (filters: projectId, category, limit, offset) |
 | GET | `/memories/:id` | JWT/PAT | Get memory by ID |
 | POST | `/memories` | JWT/PAT | Create memory |
 | PATCH | `/memories/:id` | JWT/PAT | Update memory (creates version) |
 | DELETE | `/memories/:id` | JWT/PAT | Delete memory |
-| POST | `/memories/search` | JWT/PAT | Search by text (+ optional semantic) |
+| POST | `/memories/search` | JWT/PAT | Search by text (+ optional semantic); filters: category, sourceAgent, limit |
 | GET | `/memories/:id/versions` | JWT/PAT | Get version history |
 | POST | `/memories/share` | JWT/PAT | Share memory with user/group |
 | GET | `/memories/shared` | JWT/PAT | Get memories shared with me |
@@ -286,7 +330,7 @@ erDiagram
 #### Sessions (6 endpoints)
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/sessions` | JWT/PAT | List sessions (filters: projectId) |
+| GET | `/sessions` | JWT/PAT | List sessions (filters: projectId, limit, offset) |
 | GET | `/sessions/:id` | JWT/PAT | Get session by ID |
 | POST | `/sessions` | JWT/PAT | Create session |
 | POST | `/sessions/:id/end` | JWT/PAT | End session with summary |
@@ -314,11 +358,15 @@ erDiagram
 |---|---|---|---|
 | POST | `/export` | JWT/PAT | Export project memories to agent format |
 
-#### Admin (2 endpoints)
+#### Admin (6 endpoints)
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/admin/stats` | Admin | System-wide statistics |
-| GET | `/admin/audit` | Admin | Audit log viewer |
+| GET | `/admin/audit` | Admin | Audit log viewer (supports `limit`, `offset`) |
+| GET | `/admin/retention` | Admin | List retention policies |
+| PATCH | `/admin/retention/:resource` | Admin | Update retention policy (days, enabled) |
+| GET | `/admin/retention/stats` | Admin | Active vs archived row counts per table |
+| POST | `/admin/retention/run` | Admin | Trigger manual retention cleanup |
 
 ## Component Breakdown
 
@@ -330,14 +378,14 @@ Shared TypeScript package consumed by API and MCP server.
 
 ### `packages/api` (`@memai/api`)
 Fastify REST API — the core backend.
-- **`src/index.ts`**: Server bootstrap (CORS, rate limiting, error handling, route registration)
+- **`src/index.ts`**: Server bootstrap (CORS, rate limiting, error handling, route registration, retention scheduler via `setInterval` every 24h)
 - **`src/db/schema.ts`**: Drizzle ORM schema (13 tables, relations, custom vector type)
 - **`src/db/migrate.ts`**: Migration runner
 - **`src/db/seed.ts`**: Seed script (admin user, demo group/project)
 - **`src/routes/`**: 11 route files (health, auth, users, groups, projects, memories, sessions, repos, webhooks, export, admin)
-- **`src/middleware/`**: auth (JWT + PAT), rbac (role checks), audit (action logging)
-- **`src/auth/`**: JWT sign/verify, PAT generation/hashing
-- **`src/services/`**: GitHub service (token encryption, webhook verification, file operations)
+- **`src/middleware/`**: auth (JWT + PAT), rbac (role checks), audit (`onResponse` hooks for write operations)
+- **`src/auth/`**: JWT sign/verify (HS256, 7-day), PAT generation/hashing (SHA-256, `memai_` prefix)
+- **`src/services/`**: memory, session, sharing, github (token encryption, webhook verification, file operations), embedding (Ollama), export (6 formats), repo-sync (scan + webhook handler), retention (archival + cleanup), audit (log insert + query)
 
 ### `packages/mcp-server` (`memai-mcp`)
 MCP protocol server — npm package installed on student machines.
@@ -380,30 +428,73 @@ React SPA for admin/student web access.
 ### MCP context resolution at startup
 - **Chosen**: Resolve user + project once when MCP server starts (via `MEMAI_TOKEN` + `MEMAI_PROJECT_ID`)
 - **Rationale**: Avoids per-tool-call auth overhead. The MCP server is short-lived (tied to a single agent session), so stale context is not a concern.
+- **Note**: `MEMAI_PROJECT_ID` is trusted without server-side validation at startup (the token is validated via `/auth/validate`, but the project ID is not checked against the user's accessible projects)
+
+### Soft-delete (archive) for data retention
+- **Chosen**: Set `archived_at` timestamp instead of hard-deleting expired rows
+- **Rationale**: Preserves data for ad-hoc investigation via direct SQL. Partial indexes on `archived_at IS NULL` maintain query performance for active data.
+- **Trade-off**: Archived rows still consume disk. No automated purge path in v1. Admins can run `DELETE ... WHERE archived_at IS NOT NULL` + `VACUUM` manually if disk reclamation is needed.
+
+### Audit logging via onResponse hooks
+- **Chosen**: `auditLog()` middleware registered as Fastify `onResponse` hooks on write routes
+- **Rationale**: Logging after the response is sent avoids adding latency to the request. Fire-and-forget insert with error logging.
+- **Covered actions**: `create`, `update`, `delete` on memories, groups, projects, sessions, repos; `share`/`unshare` on memories; `connect`/`disconnect`/`push` on repos; `update` on users
+
+### Google OAuth users and GitHub features
+- **Chosen**: Google OAuth users do not have a `githubAccessTokenEnc` field
+- **Rationale**: Google OAuth provides identity only; it does not grant GitHub API access. Google OAuth users cannot use repo features (connect, sync, push) until they also authenticate via GitHub.
+- **Trade-off**: Users who only log in with Google have limited functionality
+
+### Wildcard memory file patterns skipped in repo sync
+- **Chosen**: Only static file patterns (e.g., `CLAUDE.md`, `.cursorrules`) are scanned during repo sync. Wildcard patterns (e.g., `.kilocode/rules/**/*.md`) are excluded.
+- **Rationale**: The current GitHub API integration fetches files by exact path. Wildcard scanning would require listing directory contents recursively, which adds complexity and API rate limit pressure.
+- **Trade-off**: Kilo Code rule files are not auto-imported
+
+### Removed files not tracked in webhook handler
+- **Chosen**: The webhook push handler only processes `added` and `modified` files; `removed` files are ignored
+- **Rationale**: Simplifies the initial implementation. Removing a memory file from a repo does not automatically delete the corresponding memory in MemAI.
+- **Trade-off**: Stale `repoMemoryFiles` entries may accumulate for deleted files
 
 ## Non-Functional Requirements
 
 ### Performance
 - API rate limit: **100 requests per minute** (global, via `@fastify/rate-limit`)
 - Target memory CRUD latency: **< 200ms** (excluding embedding generation)
-- Embedding generation (Ollama): **< 2s** per memory (768-dim nomic-embed-text)
+- Embedding generation (Ollama): **< 2s** per memory (768-dim nomic-embed-text). Embedding is asynchronous — memory creation succeeds immediately; embedding is generated as an enhancement (Phase 5).
 - Dashboard initial load: **< 3s** on broadband
 
 ### Security
-- **Authentication**: JWT (7-day expiry) for dashboard; SHA-256 hashed PATs for MCP
+- **Authentication**: JWT (7-day expiry, HS256) for dashboard; SHA-256 hashed PATs for MCP
 - **Authorization**: RBAC with `student` and `admin` roles; admin-only routes enforced via `requireAdmin()` middleware
-- **Encryption at rest**: GitHub access tokens encrypted with AES-256-GCM (32-byte key from `ENCRYPTION_KEY`)
-- **Webhook verification**: GitHub push webhooks verified with HMAC-SHA256 using constant-time comparison (`timingSafeEqual`)
+- **Encryption at rest**: GitHub access tokens encrypted with AES-256-GCM (32-byte key from `ENCRYPTION_KEY`). Format: `${iv_hex}:${authTag_hex}:${ciphertext_hex}`
+- **Webhook verification**: GitHub push webhooks must be verified with HMAC-SHA256 using constant-time comparison (`timingSafeEqual`). Requests without valid signatures are rejected.
 - **Input validation**: All request bodies validated with Zod schemas at route boundaries
-- **Audit logging**: Significant actions logged to `audit_logs` table with user ID, action, resource, IP
+- **Audit logging**: All write operations (create, update, delete) on core resources are logged to `audit_logs` table via `onResponse` hooks with userId, action, resourceType, resourceId, and IP address
+- **CORS**: Restricted to dashboard origin via `CORS_ORIGIN` env var
+- **PAT security**: Raw PAT returned once on creation, never persisted. Only SHA-256 hash stored.
+- **OAuth**: CSRF state parameter generated but not validated in v1 (documented as known limitation)
 
 ### Scalability
 - Designed for **single VPS deployment** serving 10-50 concurrent users
 - PostgreSQL handles both relational and vector queries
 - Horizontal scaling not planned; vertical scaling (bigger VPS) is the upgrade path
+- Data retention policies manage high-volume table growth via soft-delete archival (see `feature-data-retention.md`)
 
 ### Reliability
 - Docker healthchecks on Postgres (`pg_isready`) and Ollama (`/api/tags`)
+- Docker `restart: always` policy for automatic recovery from crashes
 - API depends on healthy Postgres before starting
 - Graceful error handling with structured JSON error responses
-- Idempotent webhook processing (SHA-based dedup on `repoMemoryFiles`)
+- Idempotent webhook processing (SHA-based dedup on `repoMemoryFiles` unique constraint)
+- Graceful degradation: if Ollama is unavailable, memory operations continue without embedding generation
+
+### Observability
+- **Structured logging**: Fastify pino JSON logs with request ID, method, URL, status, and response time
+- **Health endpoint**: `GET /api/v1/health` checks DB connectivity (`SELECT 1`) and Ollama availability (`/api/tags`)
+- **Audit log**: Queryable via `GET /admin/audit` with pagination
+- **Retention stats**: Admin can view active vs archived row counts per managed table via `GET /admin/retention/stats`
+
+### Data Integrity
+- Memory version history: every `updateMemory` call inserts a `memoryVersions` record and increments `memory.version`
+- Unique constraints: `groupMembers(groupId, userId)`, `repoMemoryFiles(repoId, filePath)`, `retentionPolicies(resource)`
+- Partial indexes on `archivedAt IS NULL` for `memoryVersions`, `sessionEvents`, `auditLogs` to maintain query performance

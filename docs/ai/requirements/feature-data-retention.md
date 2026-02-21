@@ -1,3 +1,9 @@
+---
+phase: requirements
+title: Data Retention — Requirements
+description: Requirements for automated data lifecycle management on high-volume tables
+---
+
 # Data Retention — Requirements
 
 ## Problem Statement
