@@ -1,0 +1,17 @@
+{
+  "name": "memai",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "db:generate": "pnpm --filter @memai/api db:generate",
+    "db:migrate": "pnpm --filter @memai/api db:migrate",
+    "db:seed": "pnpm --filter @memai/api db:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  }
+}
