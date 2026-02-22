@@ -172,14 +172,17 @@ jobs:
           # Start/restart all services
           docker compose up -d --remove-orphans
 
-          # Run migrations
-          docker compose exec -T api node packages/api/dist/db/migrate.js || true
+          # Enable pgvector extension (idempotent)
+          docker exec memai-postgres-1 psql -U memai -d memai -c "CREATE EXTENSION IF NOT EXISTS vector;" || true
+
+          # Run migrations (from correct working directory)
+          docker exec -w /app/packages/api memai-api-1 node dist/db/migrate.js || true
 
           # Health check (retry up to 30s)
           for i in $(seq 1 6); do
-            if curl -sf http://localhost:3000/api/v1/health > /dev/null 2>&1; then
+            if docker exec memai-api-1 wget -qO- http://localhost:3000/api/v1/health 2>/dev/null; then
+              echo ""
               echo "Health check passed!"
-              curl -s http://localhost:3000/api/v1/health
               exit 0
             fi
             echo "Waiting for API... (attempt $i/6)"
