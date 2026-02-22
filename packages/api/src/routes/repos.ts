@@ -136,6 +136,11 @@ export async function repoRoutes(app: FastifyInstance) {
 
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
 
+      // Ownership check: students can only disconnect their own repos
+      if (request.userRole !== "admin" && repo.userId !== request.userId) {
+        return reply.status(403).send({ error: "You can only disconnect your own repos" });
+      }
+
       // Remove webhook from GitHub
       if (repo.webhookId) {
         const [user] = await db

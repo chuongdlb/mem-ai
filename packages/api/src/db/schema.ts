@@ -122,6 +122,7 @@ export const memories = pgTable(
     isPinned: boolean("is_pinned").notNull().default(false),
     version: integer("version").notNull().default(1),
     embedding: vector("embedding"),
+    embeddingModel: text("embedding_model"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -6,6 +6,12 @@ import {
   memoryShares,
   groupMembers,
 } from "../db/schema.js";
+import {
+  generateEmbedding,
+  isEmbeddingEnabled,
+  isEmbeddingAvailable,
+  getProviderModel,
+} from "./embedding.service.js";
 
 export interface CreateMemoryInput {
   projectId: string;
@@ -24,6 +30,29 @@ export interface UpdateMemoryInput {
   tags?: string[];
   isPinned?: boolean;
 }
+
+// ─── Embedding helper ────────────────────────────────────────────
+
+async function tryGenerateEmbedding(
+  title: string,
+  content: string
+): Promise<{ embedding: number[]; model: string } | null> {
+  if (!isEmbeddingEnabled()) return null;
+
+  try {
+    const available = await isEmbeddingAvailable();
+    if (!available) return null;
+
+    const text = `${title}\n\n${content}`;
+    const embedding = await generateEmbedding(text);
+    return { embedding, model: getProviderModel() };
+  } catch (err) {
+    console.error("[embedding] Failed to generate embedding:", err);
+    return null;
+  }
+}
+
+// ─── CRUD ────────────────────────────────────────────────────────
 
 export async function createMemory(input: CreateMemoryInput) {
   const [memory] = await db
@@ -49,6 +78,20 @@ export async function createMemory(input: CreateMemoryInput) {
     changedBy: input.userId,
     changeReason: input.sourceAgent ? "mcp_write" : "manual_edit",
   });
+
+  // Best-effort embedding generation
+  const result = await tryGenerateEmbedding(memory.title, memory.content);
+  if (result) {
+    const [updated] = await db
+      .update(memories)
+      .set({
+        embedding: result.embedding,
+        embeddingModel: result.model,
+      })
+      .where(eq(memories.id, memory.id))
+      .returning();
+    return updated;
+  }
 
   return memory;
 }
@@ -113,6 +156,26 @@ export async function updateMemory(
     changeReason,
   });
 
+  // Re-generate embedding if title or content changed
+  const contentChanged =
+    (input.title !== undefined && input.title !== existing.title) ||
+    (input.content !== undefined && input.content !== existing.content);
+
+  if (contentChanged) {
+    const result = await tryGenerateEmbedding(updated.title, updated.content);
+    if (result) {
+      const [withEmbedding] = await db
+        .update(memories)
+        .set({
+          embedding: result.embedding,
+          embeddingModel: result.model,
+        })
+        .where(eq(memories.id, memoryId))
+        .returning();
+      return withEmbedding;
+    }
+  }
+
   return updated;
 }
 
@@ -120,7 +183,9 @@ export async function deleteMemory(memoryId: string) {
   await db.delete(memories).where(eq(memories.id, memoryId));
 }
 
-export async function searchMemories(opts: {
+// ─── Search ──────────────────────────────────────────────────────
+
+function textOnlySearch(opts: {
   query: string;
   projectId?: string;
   userId?: string;
@@ -129,7 +194,6 @@ export async function searchMemories(opts: {
 }) {
   const conditions = [];
 
-  // Full-text search on title and content
   conditions.push(
     or(
       ilike(memories.title, `%${opts.query}%`),
@@ -147,6 +211,80 @@ export async function searchMemories(opts: {
     limit: opts.limit || 20,
   });
 }
+
+async function hybridSearch(opts: {
+  query: string;
+  projectId?: string;
+  userId?: string;
+  category?: string;
+  limit?: number;
+}): Promise<Array<typeof memories.$inferSelect>> {
+  const queryEmbedding = await generateEmbedding(opts.query);
+  const vectorStr = `[${queryEmbedding.join(",")}]`;
+  const currentModel = getProviderModel();
+  const limit = opts.limit || 20;
+  const queryPattern = `%${opts.query}%`;
+
+  const filters = [];
+  if (opts.projectId) filters.push(sql`m.project_id = ${opts.projectId}`);
+  if (opts.userId) filters.push(sql`m.user_id = ${opts.userId}`);
+  if (opts.category) filters.push(sql`m.category = ${opts.category}`);
+
+  const extraWhere =
+    filters.length > 0
+      ? sql`AND ${sql.join(filters, sql` AND `)}`
+      : sql``;
+
+  const result = await db.execute<typeof memories.$inferSelect>(sql`
+    SELECT m.*
+    FROM memories m
+    WHERE (
+      (m.embedding IS NOT NULL AND m.embedding_model = ${currentModel})
+      OR m.title ILIKE ${queryPattern}
+      OR m.content ILIKE ${queryPattern}
+    )
+    ${extraWhere}
+    ORDER BY (
+      CASE
+        WHEN m.embedding IS NOT NULL AND m.embedding_model = ${currentModel}
+        THEN (1.0 - (m.embedding <=> ${vectorStr}::vector))
+        ELSE 0
+      END * 0.7
+      + CASE
+        WHEN m.title ILIKE ${queryPattern} OR m.content ILIKE ${queryPattern}
+        THEN 1
+        ELSE 0
+      END * 0.3
+    ) DESC
+    LIMIT ${limit}
+  `);
+
+  return result as unknown as Array<typeof memories.$inferSelect>;
+}
+
+export async function searchMemories(opts: {
+  query: string;
+  projectId?: string;
+  userId?: string;
+  category?: string;
+  limit?: number;
+}) {
+  // Try hybrid search if embedding provider is enabled and available
+  if (isEmbeddingEnabled()) {
+    try {
+      const available = await isEmbeddingAvailable();
+      if (available) {
+        return await hybridSearch(opts);
+      }
+    } catch (err) {
+      console.error("[search] Hybrid search failed, falling back to text:", err);
+    }
+  }
+
+  return textOnlySearch(opts);
+}
+
+// ─── Sharing ─────────────────────────────────────────────────────
 
 export async function getSharedMemories(userId: string) {
   // Get groups the user belongs to

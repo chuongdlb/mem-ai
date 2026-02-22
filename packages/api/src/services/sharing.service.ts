@@ -21,6 +21,12 @@ export async function shareMemory(input: {
   return share;
 }
 
+export async function getShare(shareId: string) {
+  return db.query.memoryShares.findFirst({
+    where: eq(memoryShares.id, shareId),
+  });
+}
+
 export async function unshareMemory(shareId: string) {
   await db.delete(memoryShares).where(eq(memoryShares.id, shareId));
 }

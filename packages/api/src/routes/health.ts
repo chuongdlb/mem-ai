@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/index.js";
 import { sql } from "drizzle-orm";
-import { isOllamaAvailable } from "../services/embedding.service.js";
+import {
+  isEmbeddingAvailable,
+  isEmbeddingEnabled,
+  getProviderName,
+} from "../services/embedding.service.js";
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get("/api/v1/health", async () => {
@@ -15,13 +19,18 @@ export async function healthRoutes(app: FastifyInstance) {
       checks.database = "error";
     }
 
-    // Ollama check
-    checks.ollama = (await isOllamaAvailable()) ? "ok" : "unavailable";
+    // Embedding provider check
+    if (!isEmbeddingEnabled()) {
+      checks.embedding = "disabled";
+    } else {
+      checks.embedding = (await isEmbeddingAvailable()) ? "ok" : "unavailable";
+    }
 
     const healthy = checks.database === "ok";
     return {
       status: healthy ? "healthy" : "unhealthy",
       checks,
+      embeddingProvider: getProviderName(),
       timestamp: new Date().toISOString(),
     };
   });

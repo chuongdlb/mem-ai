@@ -87,6 +87,7 @@ export default function SettingsPage() {
   }
 
   async function deleteToken(id: string) {
+    if (!confirm("Are you sure you want to delete this token? Any MCP servers using it will stop working.")) return;
     await api.delete(`/api/v1/auth/tokens/${id}`);
     loadTokens();
   }

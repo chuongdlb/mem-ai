@@ -5,6 +5,7 @@ import { initAuth } from "./auth.js";
 import { memoryReadSchema, memoryRead } from "./tools/memoryRead.js";
 import { memoryWriteSchema, memoryWrite } from "./tools/memoryWrite.js";
 import { memorySearchSchema, memorySearch } from "./tools/memorySearch.js";
+import { memoryUpdateSchema, memoryUpdate } from "./tools/memoryUpdate.js";
 import { memoryDeleteSchema, memoryDelete } from "./tools/memoryDelete.js";
 import { sessionStartSchema, sessionStart } from "./tools/sessionStart.js";
 import { sessionLogSchema, sessionLog } from "./tools/sessionLog.js";
@@ -37,7 +38,11 @@ export async function createServer() {
   });
 
   server.tool("memory_write", "Write a new memory to the project", memoryWriteSchema, async (params) => {
-    return memoryWrite(apiClient, params);
+    return memoryWrite(apiClient, params, process.env.MEMAI_AGENT_TYPE);
+  });
+
+  server.tool("memory_update", "Update an existing memory", memoryUpdateSchema, async (params) => {
+    return memoryUpdate(apiClient, params);
   });
 
   server.tool("memory_search", "Search memories by text query", memorySearchSchema, async (params) => {

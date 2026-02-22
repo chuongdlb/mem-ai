@@ -10,6 +10,9 @@ RUN pnpm install --frozen-lockfile || pnpm install
 
 COPY packages/dashboard/ packages/dashboard/
 
+ARG VITE_API_URL=http://localhost:3000
+ENV VITE_API_URL=$VITE_API_URL
+
 RUN pnpm --filter @memai/dashboard build
 
 # ── Serve with nginx ────────────────────────────────────────────

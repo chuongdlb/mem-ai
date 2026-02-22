@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 
@@ -22,6 +23,8 @@ const app = Fastify({
 });
 
 // Plugins
+await app.register(cookie);
+
 await app.register(cors, {
   origin: process.env.CORS_ORIGIN || true,
   credentials: true,

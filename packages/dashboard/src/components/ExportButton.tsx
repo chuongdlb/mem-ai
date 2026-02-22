@@ -6,6 +6,7 @@ const FORMATS = [
   { value: "claude-md", label: "Claude MD" },
   { value: "gemini-md", label: "Gemini MD" },
   { value: "cursorrules", label: "Cursor Rules" },
+  { value: "skill-md", label: "Skill MD" },
   { value: "json", label: "JSON" },
   { value: "report", label: "Report" },
 ];

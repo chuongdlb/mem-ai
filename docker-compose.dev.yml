@@ -1,3 +1,4 @@
+# Ollama is optional — set EMBEDDING_PROVIDER=none to skip it
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -19,6 +20,7 @@ services:
   ollama:
     image: ollama/ollama
     restart: unless-stopped
+    profiles: ["ollama"]
     ports:
       - "11434:11434"
     volumes:

@@ -88,6 +88,16 @@ export async function sessionRoutes(app: FastifyInstance) {
     { preHandler: [authMiddleware] },
     async (request, reply) => {
       const body = createSessionEventSchema.parse(request.body);
+
+      // Ownership check: students can only log events to their own sessions
+      if (request.userRole !== "admin") {
+        const session = await sessionService.getSession(body.sessionId);
+        if (!session) return reply.status(404).send({ error: "Session not found" });
+        if (session.userId !== request.userId) {
+          return reply.status(403).send({ error: "You can only log events to your own sessions" });
+        }
+      }
+
       const event = await sessionService.addSessionEvent(body);
       return reply.status(201).send(event);
     }

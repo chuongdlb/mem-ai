@@ -10,19 +10,23 @@ import {
   LogOut,
 } from "lucide-react";
 import { clearToken } from "../lib/api.js";
+import { useUser } from "../lib/userContext.js";
 
 const nav = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/students", label: "Students", icon: Users },
-  { to: "/groups", label: "Groups", icon: FolderOpen },
-  { to: "/memories", label: "Memories", icon: Brain },
-  { to: "/sessions", label: "Sessions", icon: MessageSquare },
-  { to: "/repos", label: "Repos", icon: GitBranch },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, adminOnly: false },
+  { to: "/students", label: "Students", icon: Users, adminOnly: true },
+  { to: "/groups", label: "Groups", icon: FolderOpen, adminOnly: false },
+  { to: "/memories", label: "Memories", icon: Brain, adminOnly: false },
+  { to: "/sessions", label: "Sessions", icon: MessageSquare, adminOnly: false },
+  { to: "/repos", label: "Repos", icon: GitBranch, adminOnly: false },
+  { to: "/settings", label: "Settings", icon: Settings, adminOnly: false },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const { isAdmin } = useUser();
+
+  const visibleNav = nav.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -34,7 +38,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3">
-          {nav.map(({ to, label, icon: Icon }) => {
+          {visibleNav.map(({ to, label, icon: Icon }) => {
             const active = location.pathname === to;
             return (
               <Link

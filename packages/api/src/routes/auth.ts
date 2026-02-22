@@ -11,18 +11,34 @@ import { encryptToken } from "../services/github.service.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { createPatSchema } from "@memai/shared";
 
+const OAUTH_STATE_COOKIE = "oauth_state";
+const OAUTH_STATE_MAX_AGE_S = 600; // 10 minutes
+
 export async function authRoutes(app: FastifyInstance) {
   // ── GitHub OAuth ─────────────────────────────────────────────
 
   app.get("/api/v1/auth/github", async (request, reply) => {
     const state = randomBytes(16).toString("hex");
-    // In production, store state in a short-lived cookie/session for CSRF protection
+    reply.setCookie(OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: OAUTH_STATE_MAX_AGE_S,
+      secure: process.env.NODE_ENV === "production",
+    });
     return reply.redirect(getGitHubAuthUrl(state));
   });
 
   app.get("/api/v1/auth/github/callback", async (request, reply) => {
-    const { code } = request.query as { code: string };
+    const { code, state } = request.query as { code: string; state?: string };
     if (!code) return reply.status(400).send({ error: "Missing code" });
+
+    // Validate CSRF state
+    const savedState = request.cookies[OAUTH_STATE_COOKIE];
+    reply.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
+    if (!state || !savedState || state !== savedState) {
+      return reply.status(403).send({ error: "Invalid OAuth state — possible CSRF" });
+    }
 
     const accessToken = await exchangeGitHubCode(code);
     const ghUser = await getGitHubUser(accessToken);
@@ -76,12 +92,26 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get("/api/v1/auth/google", async (request, reply) => {
     const state = randomBytes(16).toString("hex");
+    reply.setCookie(OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: OAUTH_STATE_MAX_AGE_S,
+      secure: process.env.NODE_ENV === "production",
+    });
     return reply.redirect(getGoogleAuthUrl(state));
   });
 
   app.get("/api/v1/auth/google/callback", async (request, reply) => {
-    const { code } = request.query as { code: string };
+    const { code, state } = request.query as { code: string; state?: string };
     if (!code) return reply.status(400).send({ error: "Missing code" });
+
+    // Validate CSRF state
+    const savedState = request.cookies[OAUTH_STATE_COOKIE];
+    reply.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
+    if (!state || !savedState || state !== savedState) {
+      return reply.status(403).send({ error: "Invalid OAuth state — possible CSRF" });
+    }
 
     const accessToken = await exchangeGoogleCode(code);
     const gUser = await getGoogleUser(accessToken);

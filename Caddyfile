@@ -1,0 +1,7 @@
+{$DOMAIN} {
+	reverse_proxy dashboard:80
+}
+
+api.{$DOMAIN} {
+	reverse_proxy api:3000
+}

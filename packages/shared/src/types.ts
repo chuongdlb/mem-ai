@@ -1,6 +1,7 @@
 import type {
   AGENT_TYPES,
   CHANGE_REASONS,
+  EMBEDDING_PROVIDERS,
   EXPORT_FORMATS,
   MEMORY_CATEGORIES,
   ROLES,
@@ -15,6 +16,7 @@ export type ChangeReason = (typeof CHANGE_REASONS)[number];
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 export type Role = (typeof ROLES)[number];
 export type ShareLevel = (typeof SHARE_LEVELS)[number];
+export type EmbeddingProvider = (typeof EMBEDDING_PROVIDERS)[number];
 
 export interface User {
   id: string;
@@ -57,6 +59,7 @@ export interface Memory {
   tags: string[];
   isPinned: boolean;
   version: number;
+  embeddingModel?: string;
   createdAt: string;
   updatedAt: string;
 }

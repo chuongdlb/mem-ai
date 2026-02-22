@@ -57,3 +57,5 @@ export const ROLES = ["student", "admin"] as const;
 export const SHARE_LEVELS = ["read", "write"] as const;
 
 export const EMBEDDING_DIMENSION = 768;
+
+export const EMBEDDING_PROVIDERS = ["ollama", "openai", "none"] as const;

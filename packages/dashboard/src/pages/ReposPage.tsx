@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
-import { GitBranch, RefreshCw, Trash2, Plus } from "lucide-react";
+import { GitBranch, RefreshCw, Trash2, Plus, AlertCircle, Loader2 } from "lucide-react";
 
 interface GithubRepo {
   id: number;
@@ -25,49 +25,71 @@ export default function ReposPage() {
   const [connected, setConnected] = useState<ConnectedRepo[]>([]);
   const [available, setAvailable] = useState<GithubRepo[]>([]);
   const [showConnect, setShowConnect] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingAvailable, setLoadingAvailable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadConnected();
   }, []);
 
   function loadConnected() {
-    api.get<ConnectedRepo[]>("/api/v1/repos").then(setConnected).catch(() => {});
+    setLoading(true);
+    setError(null);
+    api
+      .get<ConnectedRepo[]>("/api/v1/repos")
+      .then(setConnected)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }
 
   async function loadAvailable() {
     setShowConnect(true);
-    setLoading(true);
+    setLoadingAvailable(true);
     try {
       const repos = await api.get<GithubRepo[]>("/api/v1/repos/available");
-      // Filter out already connected
       const connectedIds = new Set(connected.map((c) => c.fullName));
       setAvailable(repos.filter((r) => !connectedIds.has(r.fullName)));
+    } catch (err: any) {
+      setError(err.message);
     } finally {
-      setLoading(false);
+      setLoadingAvailable(false);
     }
   }
 
   async function connectRepo(repo: GithubRepo) {
-    await api.post("/api/v1/repos/connect", {
-      githubRepoId: repo.id,
-      owner: repo.owner,
-      name: repo.name,
-      fullName: repo.fullName,
-      defaultBranch: repo.defaultBranch,
-    });
-    setShowConnect(false);
-    loadConnected();
+    try {
+      await api.post("/api/v1/repos/connect", {
+        githubRepoId: repo.id,
+        owner: repo.owner,
+        name: repo.name,
+        fullName: repo.fullName,
+        defaultBranch: repo.defaultBranch,
+      });
+      setShowConnect(false);
+      loadConnected();
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   async function syncRepo(id: string) {
-    await api.post(`/api/v1/repos/${id}/sync`);
-    loadConnected();
+    try {
+      await api.post(`/api/v1/repos/${id}/sync`);
+      loadConnected();
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   async function disconnectRepo(id: string) {
-    await api.delete(`/api/v1/repos/${id}`);
-    loadConnected();
+    if (!confirm("Are you sure you want to disconnect this repo? The webhook will be removed.")) return;
+    try {
+      await api.delete(`/api/v1/repos/${id}`);
+      loadConnected();
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   return (
@@ -83,11 +105,22 @@ export default function ReposPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="flex items-center gap-2 text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm">
+          <AlertCircle size={16} />
+          {error}
+          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">x</button>
+        </div>
+      )}
+
       {showConnect && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
           <h3 className="font-semibold text-gray-900 mb-4">Select a Repository</h3>
-          {loading ? (
-            <p className="text-gray-500 text-sm">Loading your repos...</p>
+          {loadingAvailable ? (
+            <div className="flex items-center gap-2 text-gray-500 text-sm">
+              <Loader2 size={16} className="animate-spin" />
+              Loading your repos...
+            </div>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {available.map((repo) => (
@@ -107,6 +140,19 @@ export default function ReposPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center gap-2 text-gray-500 text-sm">
+          <Loader2 size={16} className="animate-spin" />
+          Loading...
+        </div>
+      )}
+
+      {!loading && connected.length === 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400">
+          No repos connected yet. Click "Connect Repo" to get started.
         </div>
       )}
 

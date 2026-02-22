@@ -8,10 +8,15 @@ import {
   getRetentionStats,
   runRetentionCleanup,
 } from "../services/retention.service.js";
+import {
+  generateEmbedding,
+  isEmbeddingEnabled,
+  getProviderModel,
+} from "../services/embedding.service.js";
 import { updateRetentionPolicySchema } from "@memai/shared";
 import { db } from "../db/index.js";
 import { users, groups, projects, memories, sessions } from "../db/schema.js";
-import { sql } from "drizzle-orm";
+import { sql, eq, or, isNull } from "drizzle-orm";
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get(
@@ -99,6 +104,65 @@ export async function adminRoutes(app: FastifyInstance) {
     async (request) => {
       const results = await runRetentionCleanup(request.log);
       return { archived: results };
+    }
+  );
+
+  // ─── Embedding Backfill ──────────────────────────────────────────
+
+  app.post(
+    "/api/v1/admin/embeddings/backfill",
+    { preHandler: [authMiddleware, requireAdmin()] },
+    async (request, reply) => {
+      if (!isEmbeddingEnabled()) {
+        return reply.status(400).send({
+          error: "Embedding provider is disabled (EMBEDDING_PROVIDER=none)",
+        });
+      }
+
+      const query = request.query as { limit?: string };
+      const batchLimit = query.limit ? parseInt(query.limit) : 100;
+      const currentModel = getProviderModel();
+
+      // Find memories with no embedding or stale model
+      const toBackfill = await db
+        .select({
+          id: memories.id,
+          title: memories.title,
+          content: memories.content,
+        })
+        .from(memories)
+        .where(
+          or(
+            isNull(memories.embedding),
+            sql`${memories.embeddingModel} != ${currentModel}`
+          )
+        )
+        .limit(batchLimit);
+
+      let succeeded = 0;
+      let failed = 0;
+
+      for (const memory of toBackfill) {
+        try {
+          const text = `${memory.title}\n\n${memory.content}`;
+          const embedding = await generateEmbedding(text);
+          await db
+            .update(memories)
+            .set({ embedding, embeddingModel: currentModel })
+            .where(eq(memories.id, memory.id));
+          succeeded++;
+        } catch (err) {
+          request.log.error({ memoryId: memory.id, err }, "Backfill failed for memory");
+          failed++;
+        }
+      }
+
+      return {
+        total: toBackfill.length,
+        succeeded,
+        failed,
+        model: currentModel,
+      };
     }
   );
 }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { projects } from "../db/schema.js";
+import { projects, groupMembers } from "../db/schema.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { auditLog } from "../middleware/audit.js";
 import { createProjectSchema, updateProjectSchema } from "@memai/shared";
@@ -10,8 +10,24 @@ export async function projectRoutes(app: FastifyInstance) {
   app.get(
     "/api/v1/projects",
     { preHandler: [authMiddleware] },
-    async () => {
+    async (request) => {
+      // Admins see all projects; students see only projects in their groups
+      if (request.userRole === "admin") {
+        return db.query.projects.findMany({
+          with: { group: true },
+        });
+      }
+
+      const memberships = await db
+        .select({ groupId: groupMembers.groupId })
+        .from(groupMembers)
+        .where(eq(groupMembers.userId, request.userId));
+
+      const groupIds = memberships.map((m) => m.groupId);
+      if (groupIds.length === 0) return [];
+
       return db.query.projects.findMany({
+        where: inArray(projects.groupId, groupIds),
         with: { group: true },
       });
     }

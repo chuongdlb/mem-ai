@@ -9,6 +9,10 @@ import {
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "0".repeat(64);
 
+if (process.env.NODE_ENV === "production" && ENCRYPTION_KEY === "0".repeat(64)) {
+  throw new Error("ENCRYPTION_KEY is not set or uses the default zero key. Set a strong key in production.");
+}
+
 // Encrypt GitHub access token for storage
 export function encryptToken(token: string): string {
   const key = Buffer.from(ENCRYPTION_KEY, "hex");
