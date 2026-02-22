@@ -65,7 +65,8 @@ export async function getGitHubUser(
   ]);
 
   const user = (await userRes.json()) as GitHubUser;
-  const emails = (await emailsRes.json()) as GitHubEmail[];
+  const emailsData = await emailsRes.json();
+  const emails = Array.isArray(emailsData) ? (emailsData as GitHubEmail[]) : [];
 
   const primaryEmail =
     emails.find((e) => e.primary && e.verified)?.email ||
